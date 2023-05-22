@@ -13,7 +13,7 @@ from networks import define_G, define_D, GANLoss, get_scheduler, update_learning
 from data.data import get_training_set, get_test_set
 
 # Training settings
-parser = argparse.ArgumentParser(description='pix2pix-pytorch-implementation')
+parser = argparse.ArgumentParser(description='pix2pix-mri & ct generation')
 parser.add_argument('--dataset', required=True, help='brain', default='data/')
 parser.add_argument('--batch_size', type=int, default=4, help='training batch size')
 parser.add_argument('--test_batch_size', type=int, default=4, help='testing batch size')
@@ -26,7 +26,6 @@ parser.add_argument('--epoch_count', type=int, default=1, help='the starting epo
 parser.add_argument('--niter', type=int, default=100, help='# of iter at starting learning rate')
 parser.add_argument('--niter_decay', type=int, default=100, help='# of iter to linearly decay learning rate to zero')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate for adam')
-parser.add_argument('--lr_policy', type=str, default='lambda', help='learning rate policy: lambda|step|plateau|cosine')
 parser.add_argument('--lr_decay_iters', type=int, default=50, help='multiply by a gamma every lr_decay_iters iterations')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
 parser.add_argument('--cuda', action='store_true', help='use cuda?')
@@ -35,6 +34,13 @@ parser.add_argument('--seed', type=int, default=123, help='random seed to use. D
 parser.add_argument('--lamb', type=int, default=10, help='weight on L1 term in objective')
 opt = parser.parse_args()
 
+print('Initializing Logs ...')
+stats_jsonl = open(os.path.join('./logs', 'stats.jsonl'), 'wt')
+try:
+    import torch.utils.tensorboard as tensorboard
+    stats_tfevents = tensorboard.SummaryWriter('./logs')
+except ImportError as err:
+    print('Skipping tfevents exports:', err)
 print(opt)
 
 if opt.cuda and not torch.cuda.is_available():
@@ -47,7 +53,7 @@ if opt.cuda:
     torch.cuda.manual_seed(opt.seed)
 
 print('===> Loading datasets')
-root_path = "data/"
+root_path = ""
 train_set = get_training_set(root_path + opt.dataset, opt.direction)
 test_set = get_test_set(root_path + opt.dataset, opt.direction)
 training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batch_size, shuffle=True)
@@ -56,8 +62,8 @@ testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batc
 device = torch.device("cuda:0" if opt.cuda else "cpu")
 
 print('===> Building models')
-net_g = define_G(opt.input_nc, opt.output_nc, opt.ngf, 'batch', False, 'normal', 0.02, gpu_id=device)
-net_d = define_D(opt.input_nc + opt.output_nc, opt.ndf, 'basic', gpu_id=device)
+net_g = define_G(opt.input_nc, opt.output_nc, opt.ngf, False, 'normal', 0.02, gpu_id=device)
+net_d = define_D(opt.input_nc + opt.output_nc, opt.ndf, gpu_id=device)
 
 criterionGAN = GANLoss().to(device)
 criterionL1 = nn.L1Loss().to(device)
@@ -76,10 +82,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         real_a, real_b = batch[0].to(device), batch[1].to(device)
         fake_b = net_g(real_a)
 
-        ######################
-        # (1) Update D network
-        ######################
-
+        # (1) D network
         optimizer_d.zero_grad()
         
         # train with fake
@@ -99,10 +102,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
        
         optimizer_d.step()
 
-        ######################
-        # (2) Update G network
-        ######################
-
+        # (2) G network
         optimizer_g.zero_grad()
 
         # First, G(A) should fake the discriminator
@@ -137,7 +137,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
     print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(testing_data_loader)))
 
     #checkpoint
-    if epoch % 50 == 0:
+    if epoch % 25 == 0:
         if not os.path.exists("checkpoint"):
             os.mkdir("checkpoint")
         if not os.path.exists(os.path.join("checkpoint", opt.dataset)):
